@@ -1,6 +1,37 @@
+import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:geolocator/geolocator.dart';
+
+class EmergencyContactItem {
+  final String id;
+  String name;
+  String phone;
+  String countryCode;
+  String relation;
+  int priority;
+  bool enabled;
+
+  EmergencyContactItem({
+    required this.id,
+    required this.name,
+    required this.phone,
+    this.countryCode = '+91',
+    this.relation = 'Family',
+    this.priority = 1,
+    this.enabled = true,
+  });
+
+  String get fullPhoneNumber {
+    final clean = phone.trim();
+    if (clean.startsWith('+')) return clean;
+    final cc = countryCode.trim().isNotEmpty ? countryCode.trim() : '+91';
+    return '$cc${clean.replaceAll(RegExp(r'^0+'), '')}';
+  }
+}
 
 void main() {
   runApp(const IndiaEmergencyApp());
@@ -41,6 +72,604 @@ class HomePageState extends State<HomePage> {
   String emergencyResult = '';
 
   final List<String> contacts = [];
+
+  // Shake SOS State
+  StreamSubscription<AccelerometerEvent>? _sensorSub;
+  bool shakeSosEnabled = true;
+  String shakeSensitivity = 'medium'; // 'low', 'medium', 'high'
+  double _lastX = 0, _lastY = 0, _lastZ = 0;
+  DateTime? _lastSampleTime;
+  int _shakePeaks = 0;
+  DateTime? _lastPeakTime;
+  DateTime? _lastTriggerTime;
+  bool _isCountdownActive = false;
+
+  final List<EmergencyContactItem> trustedContacts = [
+    EmergencyContactItem(
+      id: '1',
+      name: 'Primary Family Contact',
+      phone: '',
+      countryCode: '+91',
+      relation: 'Family',
+      priority: 1,
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    initShakeSensor();
+  }
+
+  @override
+  void dispose() {
+    _sensorSub?.cancel();
+    super.dispose();
+  }
+
+  void initShakeSensor() {
+    _sensorSub?.cancel();
+    if (!shakeSosEnabled) return;
+
+    _sensorSub = accelerometerEventStream().listen((event) {
+      if (!shakeSosEnabled || _isCountdownActive) return;
+
+      final now = DateTime.now();
+      if (_lastSampleTime != null &&
+          now.difference(_lastSampleTime!).inMilliseconds < 50) {
+        return;
+      }
+
+      final timeDiff = _lastSampleTime == null
+          ? 100
+          : now.difference(_lastSampleTime!).inMilliseconds;
+      final dx = (event.x - _lastX).abs();
+      final dy = (event.y - _lastY).abs();
+      final dz = (event.z - _lastZ).abs();
+      final magnitude = (dx + dy + dz) / (timeDiff / 100.0);
+
+      _lastX = event.x;
+      _lastY = event.y;
+      _lastZ = event.z;
+      _lastSampleTime = now;
+
+      // 10-second debounce cooldown
+      if (_lastTriggerTime != null &&
+          now.difference(_lastTriggerTime!).inMilliseconds < 10000) {
+        return;
+      }
+
+      double threshold = 18.0;
+      if (shakeSensitivity == 'low') threshold = 26.0;
+      if (shakeSensitivity == 'high') threshold = 12.0;
+
+      if (magnitude > threshold) {
+        if (_lastPeakTime != null &&
+            now.difference(_lastPeakTime!).inMilliseconds < 800) {
+          _shakePeaks++;
+        } else {
+          _shakePeaks = 1;
+        }
+        _lastPeakTime = now;
+
+        if (_shakePeaks >= 2) {
+          _shakePeaks = 0;
+          _lastTriggerTime = now;
+          triggerShakeSosCountdown();
+        }
+      } else if (_lastPeakTime != null &&
+          now.difference(_lastPeakTime!).inMilliseconds > 900) {
+        _shakePeaks = 0;
+      }
+    });
+  }
+
+  void triggerShakeSosCountdown() {
+    if (_isCountdownActive) return;
+    setState(() {
+      _isCountdownActive = true;
+    });
+
+    int secondsRemaining = 5;
+    Timer? timer;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            timer ??= Timer.periodic(const Duration(seconds: 1), (t) {
+              if (secondsRemaining > 1) {
+                setDialogState(() {
+                  secondsRemaining--;
+                });
+              } else {
+                t.cancel();
+                timer = null;
+                Navigator.of(dialogCtx, rootNavigator: true).pop();
+                _isCountdownActive = false;
+                dispatchShakeEmergency();
+              }
+            });
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFFC62838),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: const Row(
+                children: [
+                  Icon(Icons.vibration, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text(
+                    'SHAKE SOS DETECTED',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Emergency shake recognized. Activating in:',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black26,
+                      border: Border.all(color: Colors.white, width: 3),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$secondsRemaining',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 40,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Press CANCEL below if this was an accidental trigger.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFFC62838),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () {
+                      timer?.cancel();
+                      timer = null;
+                      Navigator.of(dialogCtx, rootNavigator: true).pop();
+                      setState(() {
+                        _isCountdownActive = false;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'SOS Cancelled. No emergency calls or alerts placed.',
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.cancel, color: Color(0xFFC62838)),
+                    label: const Text(
+                      'CANCEL SOS (FALSE ALARM)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) {
+      timer?.cancel();
+      _isCountdownActive = false;
+    });
+  }
+
+  Future<void> dispatchShakeEmergency() async {
+    Position? position;
+    String locationNotice = 'Retrieving GPS...';
+
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      position = await Geolocator.getCurrentPosition(
+        timeLimit: const Duration(seconds: 6),
+      );
+    } catch (_) {
+      locationNotice =
+          'Location unavailable. Emergency calling options remain active.';
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.shield_alert, color: Color(0xFFC62838)),
+              SizedBox(width: 8),
+              Text('Emergency Dispatch'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Police 112 with Confirmation
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFCDD2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'POLICE EMERGENCY 112',
+                        style: TextStyle(
+                          color: Color(0xFFC62838),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Opens the official emergency dialer for user confirmation.',
+                        style: TextStyle(fontSize: 11, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFC62838),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            callNumber('112');
+                          },
+                          icon: const Icon(Icons.phone),
+                          label: const Text('Call 112 Now'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // Location Status
+                Text(
+                  position != null
+                      ? 'GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)} (±${position.accuracy.round()}m)'
+                      : locationNotice,
+                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+
+                const SizedBox(height: 14),
+                const Text(
+                  'Family Emergency Contacts:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+
+                if (trustedContacts.isEmpty ||
+                    trustedContacts.every((c) => c.phone.trim().isEmpty))
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No family phone numbers configured yet. Add them in Shake SOS settings.',
+                      style: TextStyle(fontSize: 11, color: Colors.black54),
+                    ),
+                  )
+                else
+                  ...trustedContacts
+                      .where((c) => c.phone.trim().isNotEmpty)
+                      .map((contact) {
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        dense: true,
+                        title: Text('${contact.name} (${contact.relation})'),
+                        subtitle: Text(contact.fullPhoneNumber),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.phone, color: Colors.green),
+                              onPressed: () {
+                                callNumber(contact.fullPhoneNumber);
+                              },
+                              tooltip: 'Call',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.sms, color: Colors.blue),
+                              onPressed: () async {
+                                String msg =
+                                    '🚨 EMERGENCY SOS! I need immediate help in India.\n';
+                                if (position != null) {
+                                  msg +=
+                                      '📍 Live Location: https://www.google.com/maps?q=${position.latitude},${position.longitude}\n';
+                                }
+                                msg += 'Helpline: 112';
+
+                                final uri = Uri(
+                                  scheme: 'sms',
+                                  path: contact.fullPhoneNumber,
+                                  queryParameters: {'body': msg},
+                                );
+                                try {
+                                  await launchUrl(uri);
+                                } catch (_) {}
+                              },
+                              tooltip: 'Send SMS SOS',
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void showShakeSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setModalState) {
+            return AlertDialog(
+              title: const Text('Shake-to-Emergency SOS'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Enable Shake SOS'),
+                      subtitle: const Text('Detect deliberate phone shakes'),
+                      value: shakeSosEnabled,
+                      onChanged: (val) {
+                        setState(() {
+                          shakeSosEnabled = val;
+                          initShakeSensor();
+                        });
+                        setModalState(() {});
+                      },
+                    ),
+                    const Divider(),
+                    const Text(
+                      'Sensitivity:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Low (Firm, deliberate shake)'),
+                      value: 'low',
+                      groupValue: shakeSensitivity,
+                      onChanged: (val) {
+                        setState(() {
+                          shakeSensitivity = val!;
+                        });
+                        setModalState(() {});
+                      },
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Medium (Standard deliberate)'),
+                      value: 'medium',
+                      groupValue: shakeSensitivity,
+                      onChanged: (val) {
+                        setState(() {
+                          shakeSensitivity = val!;
+                        });
+                        setModalState(() {});
+                      },
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('High (Light deliberate)'),
+                      value: 'high',
+                      groupValue: shakeSensitivity,
+                      onChanged: (val) {
+                        setState(() {
+                          shakeSensitivity = val!;
+                        });
+                        setModalState(() {});
+                      },
+                    ),
+                    const Divider(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Family Contacts:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            _showAddContactDialog(dialogCtx, setModalState);
+                          },
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+                    ...trustedContacts.asMap().entries.map((entry) {
+                      final idx = entry.key;
+                      final contact = entry.value;
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          radius: 12,
+                          child: Text('${idx + 1}', style: const TextStyle(fontSize: 10)),
+                        ),
+                        title: Text('${contact.name} (${contact.relation})'),
+                        subtitle: Text(contact.fullPhoneNumber),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                          onPressed: () {
+                            setState(() {
+                              trustedContacts.removeAt(idx);
+                            });
+                            setModalState(() {});
+                          },
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          triggerShakeSosCountdown();
+                        },
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('Test 5-Second SOS Countdown'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Done'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAddContactDialog(BuildContext parentCtx, StateSetter parentSetState) {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    String relation = 'Family';
+    String cc = '+91';
+
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Add Family Contact'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Name (e.g. Mother)'),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                SizedBox(
+                  width: 80,
+                  child: DropdownButtonFormField<String>(
+                    value: cc,
+                    items: const [
+                      DropdownMenuItem(value: '+91', child: Text('+91')),
+                      DropdownMenuItem(value: '+1', child: Text('+1')),
+                      DropdownMenuItem(value: '+44', child: Text('+44')),
+                    ],
+                    onChanged: (v) => cc = v ?? '+91',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(labelText: 'Phone number'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (nameCtrl.text.trim().isNotEmpty &&
+                  phoneCtrl.text.trim().isNotEmpty) {
+                setState(() {
+                  trustedContacts.add(
+                    EmergencyContactItem(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: nameCtrl.text.trim(),
+                      phone: phoneCtrl.text.trim(),
+                      countryCode: cc,
+                      relation: relation,
+                      priority: trustedContacts.length + 1,
+                    ),
+                  );
+                });
+                parentSetState(() {});
+                Navigator.pop(c);
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> callNumber(String number) async {
     final uri = Uri(scheme: 'tel', path: number);
@@ -115,6 +744,12 @@ class HomePageState extends State<HomePage> {
       r'fire|smoke|आग|धुआं|ਅੱਗ',
     ).hasMatch(value)) {
       return 'Possible fire emergency. Move away from danger and call 112.';
+    }
+
+    if (RegExp(
+      r'earthquake|tremor|shaking|bhukamp|bhookamp|भूकंप|ਭੂਚਾਲ',
+    ).hasMatch(value)) {
+      return 'Possible earthquake emergency. Drop, Cover and Hold On. Call 112.';
     }
 
     return 'If you are in immediate danger, call 112.';
@@ -311,6 +946,13 @@ class HomePageState extends State<HomePage> {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.vibration),
+            tooltip: 'Shake SOS Settings',
+            onPressed: showShakeSettingsDialog,
+          ),
+        ],
       ),
 
       body: ListView(
@@ -321,6 +963,83 @@ class HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          Card(
+            color: const Color(0xffFFF3F4),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xffFFCDD2)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.screen_rotation, color: Color(0xffC62838)),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Shake-to-Emergency SOS',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: Color(0xffC62838),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: shakeSosEnabled ? Colors.green.shade100 : Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          shakeSosEnabled ? 'ACTIVE' : 'OFF',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: shakeSosEnabled ? Colors.green.shade800 : Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Shake phone firmly to trigger 112 emergency dialer and family GPS SMS alerts. Sensitivity: ${shakeSensitivity.toUpperCase()}.',
+                    style: const TextStyle(fontSize: 12, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: triggerShakeSosCountdown,
+                          icon: const Icon(Icons.play_arrow, size: 16),
+                          label: const Text('Test 5s SOS', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xff102B4D),
+                          ),
+                          onPressed: showShakeSettingsDialog,
+                          icon: const Icon(Icons.tune, size: 16),
+                          label: const Text('Configure', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
 

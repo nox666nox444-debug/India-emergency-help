@@ -1,3 +1,4 @@
+import http from 'http';
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
@@ -260,17 +261,82 @@ app.get('/api/health', (_req, res) => {
 });
 
 async function startServer() {
-  // Mount Vite middleware in development
+  const server = http.createServer(app);
+  let isShuttingDown = false;
+
+  const isHmrDisabled = process.env.DISABLE_HMR === 'true';
+  // Mount Vite middleware in development with explicit HMR server attachment
   const vite = await createViteServer({
-    server: { middlewareMode: true },
+    server: {
+      middlewareMode: true,
+      hmr: isHmrDisabled ? false : { server },
+    },
     appType: 'spa',
   });
 
   app.use(vite.middlewares);
 
-  app.listen(PORT, () => {
+  // Guard WebSocket upgrades during server shutdown
+  server.on('upgrade', (_req, socket) => {
+    if (isShuttingDown) {
+      try {
+        socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+        socket.destroy();
+      } catch {}
+    }
+  });
+
+  // Handle client errors gracefully to avoid server crashes
+  server.on('clientError', (err: any, socket) => {
+    if (err.code === 'ECONNRESET' || !socket.writable) return;
+    try {
+      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    } catch {}
+  });
+
+  server.listen(PORT, () => {
     console.log(`India Emergency Help app server running on http://localhost:${PORT}`);
   });
+
+  // Handle process signal interruptions (SIGTERM from Cloud Run/Docker, SIGINT from Ctrl+C)
+  const handleSignal = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[DevServer] Received ${signal}. Gracefully closing Vite and HTTP listeners...`);
+
+    try {
+      if (vite) {
+        await vite.close();
+        console.log('[DevServer] Vite server closed.');
+      }
+    } catch (err) {
+      console.error('[DevServer] Error closing Vite instance:', err);
+    }
+
+    server.close((err) => {
+      if (err) {
+        console.error('[DevServer] Error closing HTTP server:', err);
+        process.exit(1);
+      }
+      console.log('[DevServer] Server closed cleanly.');
+      process.exit(0);
+    });
+
+    // Force termination if connections do not drain within 3.5 seconds
+    setTimeout(() => {
+      console.log('[DevServer] Forcing shutdown.');
+      process.exit(0);
+    }, 3500).unref();
+  };
+
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
+  process.on('SIGINT', () => handleSignal('SIGINT'));
+  process.on('SIGHUP', () => handleSignal('SIGHUP'));
 }
+
+// Global server process error protection
+process.on('unhandledRejection', (reason) => {
+  console.warn('[DevServer] Unhandled promise rejection intercepted:', reason);
+});
 
 startServer();

@@ -45,6 +45,7 @@ export const SosBeaconModal: React.FC<SosBeaconModalProps> = ({
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [situationNote, setSituationNote] = useState<string>('');
   const [consentGiven, setConsentGiven] = useState<boolean>(false);
+  const [consentWarning, setConsentWarning] = useState<boolean>(false);
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -380,11 +381,18 @@ export const SosBeaconModal: React.FC<SosBeaconModalProps> = ({
           </div>
 
           {/* Quick Broadcast CTAs */}
+          {consentWarning && (
+            <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Please check the explicit location sharing consent box above before broadcasting.</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => {
                 if (!consentGiven) {
-                  alert('Please check the consent box above before dispatching your SOS location.');
+                  setConsentWarning(true);
                   return;
                 }
                 handleSendWhatsAppToContact();
@@ -397,7 +405,7 @@ export const SosBeaconModal: React.FC<SosBeaconModalProps> = ({
             <button
               onClick={() => {
                 if (!consentGiven) {
-                  alert('Please check the consent box above before dispatching your SOS location.');
+                  setConsentWarning(true);
                   return;
                 }
                 handleSendSmsToContact();

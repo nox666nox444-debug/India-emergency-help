@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phone, Copy, Check, Search, ShieldAlert, HeartPulse, Flame, Users, Landmark, Train, HelpCircle, Siren, AlertTriangle } from 'lucide-react';
+import { Phone, Copy, Check, Search, ShieldAlert, HeartPulse, Flame, Users, Landmark, Train, HelpCircle, Siren, AlertTriangle, Smartphone } from 'lucide-react';
 import { EmergencyContact, NATIONAL_PRIMARY_NUMBERS } from '../data/emergencyNumbers';
 import { SupportedLang, TRANSLATIONS } from '../data/translations';
 
@@ -8,6 +8,7 @@ interface EmergencySpeedDialProps {
   onOpenSos: () => void;
   onOpenSiren: () => void;
   onOpenEarthquake: () => void;
+  onOpenShakeSos?: () => void;
 }
 
 export const EmergencySpeedDial: React.FC<EmergencySpeedDialProps> = ({
@@ -15,6 +16,7 @@ export const EmergencySpeedDial: React.FC<EmergencySpeedDialProps> = ({
   onOpenSos,
   onOpenSiren,
   onOpenEarthquake,
+  onOpenShakeSos,
 }) => {
   const t = TRANSLATIONS[currentLang];
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -111,6 +113,15 @@ export const EmergencySpeedDial: React.FC<EmergencySpeedDialProps> = ({
                   <AlertTriangle className="w-4 h-4 text-red-400" />
                   <span>{t.earthquakeSafetyBtn}</span>
                 </button>
+                {onOpenShakeSos && (
+                  <button
+                    onClick={onOpenShakeSos}
+                    className="flex items-center justify-center gap-2 px-5 py-3.5 text-sm font-semibold text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 rounded-xl transition-all whitespace-nowrap shrink-0 min-h-[48px]"
+                  >
+                    <Smartphone className="w-4 h-4 text-rose-400" />
+                    <span>{t.shakeSosBtn || 'Shake SOS'}</span>
+                  </button>
+                )}
               </div>
 
               {/* Zero-Pill Quiet Micro-Metadata */}

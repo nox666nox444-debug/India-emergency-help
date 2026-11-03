@@ -1,5 +1,4 @@
-import React from 'react';
-import { PhoneCall, AlertTriangle, Globe, Sun, Moon, Volume2, Mic, Lock, Shield } from 'lucide-react';
+import { PhoneCall, AlertTriangle, Globe, Sun, Moon, Volume2, Mic, Lock, Shield, Smartphone } from 'lucide-react';
 import { SupportedLang, LANGUAGE_OPTIONS, TRANSLATIONS } from '../data/translations';
 
 interface TopNavProps {
@@ -11,6 +10,7 @@ interface TopNavProps {
   onOpenLocker: () => void;
   onOpenPrivacy: () => void;
   onOpenEarthquake: () => void;
+  onOpenShakeSos: () => void;
   activeSection: string;
   onNavigate: (section: string) => void;
   darkMode: boolean;
@@ -26,6 +26,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenLocker,
   onOpenPrivacy,
   onOpenEarthquake,
+  onOpenShakeSos,
   activeSection,
   onNavigate,
   darkMode,
@@ -125,6 +126,16 @@ export const TopNav: React.FC<TopNavProps> = ({
               aria-label="Earthquake Safety"
             >
               <AlertTriangle className="w-5 h-5" />
+            </button>
+
+            {/* Shake-to-Emergency SOS Quick Trigger */}
+            <button
+              onClick={onOpenShakeSos}
+              title="Shake-to-Emergency SOS (Accelerometer & 112)"
+              className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors flex items-center justify-center min-w-[40px] min-h-[40px]"
+              aria-label="Shake-to-Emergency SOS"
+            >
+              <Smartphone className="w-5 h-5" />
             </button>
 
             {/* Siren Quick Trigger */}

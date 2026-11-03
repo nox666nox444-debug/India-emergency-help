@@ -140,6 +140,11 @@ export const VoiceEmergencyModal: React.FC<VoiceEmergencyModalProps> = ({
       setDetectedTrigger('Fire Emergency Detected (अग्नि आपातकाल)');
       setRecommendedNumber('101');
     }
+    // Earthquake & Tremors (English, Hindi, Punjabi)
+    else if (/earthquake|tremor|shaking|bhukamp|bhookamp|भूकंप|ਭੂਚਾਲ/.test(value)) {
+      setDetectedTrigger('Earthquake Emergency Detected (भूकंप / ਭੂਚਾਲ)');
+      setRecommendedNumber('112');
+    }
     // Snakebite
     else if (/snake|snakebite|saanp|सांप/.test(value)) {
       setDetectedTrigger('Snakebite Emergency Detected (सर्पदंश)');

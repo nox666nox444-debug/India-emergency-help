@@ -38,6 +38,16 @@ export interface TranslationStrings {
   aiAdvisorSubtitle: string;
   disclaimer: string;
   earthquakeSafetyBtn: string;
+  shakeSosBtn?: string;
+  shakeSosTitle?: string;
+  shakeSosDesc?: string;
+  shakeDetected?: string;
+  cancelSos?: string;
+  policeEmergency112?: string;
+  familyContacts?: string;
+  addEmergencyContact?: string;
+  sensitivityLabel?: string;
+  countdownNotice?: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -79,6 +89,16 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     aiAdvisorTitle: 'AI First-Aid & Emergency Assistant',
     aiAdvisorSubtitle: 'Get step-by-step guidance for acute trauma, accidents, and sudden illness.',
     disclaimer: 'In life-threatening situations, always call 112 or 108 immediately while performing first aid.',
+    shakeSosBtn: 'Shake SOS',
+    shakeSosTitle: 'Shake-to-Emergency SOS',
+    shakeSosDesc: 'Shake your phone firmly to trigger emergency 112 calling and GPS location dispatch to family contacts.',
+    shakeDetected: 'Emergency Shake Detected!',
+    cancelSos: 'CANCEL SOS',
+    policeEmergency112: 'Police Emergency 112',
+    familyContacts: 'Family Emergency Contacts',
+    addEmergencyContact: 'Add Emergency Contact',
+    sensitivityLabel: 'Shake Sensitivity',
+    countdownNotice: '5-second countdown to cancel accidental trigger before dispatch',
   },
   hi: {
     appName: 'भारत आपातकालीन सहायता',
@@ -118,6 +138,16 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     aiAdvisorTitle: 'AI आपातकालीन प्राथमिक सलाहकार',
     aiAdvisorSubtitle: 'गंभीर आघात, दुर्घटना और अचानक बीमारी के लिए चरण-दर-चरण मार्गदर्शन।',
     disclaimer: 'गंभीर आपात स्थिति में तुरंत 112 या 108 पर कॉल करें।',
+    shakeSosBtn: 'शेक SOS',
+    shakeSosTitle: 'शेक-टू-इमरजेंसी SOS',
+    shakeSosDesc: 'फोन को हिलाकर तुरंत 112 आपातकालीन कॉल और परिजनों को GPS लोकेशन SMS भेजें।',
+    shakeDetected: 'आपातकालीन फोन शेक पहचाना गया!',
+    cancelSos: 'SOS रद्द करें (रुकें)',
+    policeEmergency112: 'पुलिस आपातकाल 112',
+    familyContacts: 'पारिवारिक आपातकालीन संपर्क',
+    addEmergencyContact: 'नया संपर्क जोड़ें',
+    sensitivityLabel: 'शेक संवेदनशीलता',
+    countdownNotice: 'गलती से सक्रिय होने पर 5 सेकंड में रद्द करें',
   },
   bn: {
     appName: 'ভারত জরুরি সহায়তা',
@@ -391,6 +421,16 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     aiAdvisorTitle: 'AI ਐਮਰਜੈਂਸੀ ਮੁੱਢਲਾ ਸਲਾਹਕਾਰ',
     aiAdvisorSubtitle: 'ਜ਼ਖ਼ਮੀ ਹੋਣ ਅਤੇ ਅਚਾਨਕ ਬਿਮਾਰੀ ਲਈ ਕਦਮ-ਦਰ-ਕਦਮ ਮਾਰਗਦਰਸ਼ਨ।',
     disclaimer: 'ਗੰਭੀਰ ਐਮਰਜੈਂਸੀ ਵਿੱਚ ਤੁਰੰਤ 112 ਜਾਂ 108 ਤੇ ਕਾਲ ਕਰੋ।',
+    shakeSosBtn: 'ਸ਼ੇਕ SOS',
+    shakeSosTitle: 'ਸ਼ੇਕ-ਟੂ-ਐਮਰਜੈਂਸੀ SOS',
+    shakeSosDesc: 'ਫ਼ੋਨ ਨੂੰ ਹਿਲਾ ਕੇ ਤੁਰੰਤ 112 ਕਾਲ ਅਤੇ ਪਰਿਵਾਰ ਨੂੰ GPS ਲੋਕੇਸ਼ਨ ਸੁਨੇਹਾ ਭੇਜੋ।',
+    shakeDetected: 'ਐਮਰਜੈਂਸੀ ਫ਼ੋਨ ਸ਼ੇਕ ਪਛਾਣਿਆ ਗਿਆ!',
+    cancelSos: 'SOS ਰੱਦ ਕਰੋ (ਰੋਕੋ)',
+    policeEmergency112: 'ਪੁਲਿਸ ਐਮਰਜੈਂਸੀ 112',
+    familyContacts: 'ਪਰਿਵਾਰਕ ਐਮਰਜੈਂਸੀ ਸੰਪਰਕ',
+    addEmergencyContact: 'ਨਵਾਂ ਸੰਪਰਕ ਜੋੜੋ',
+    sensitivityLabel: 'ਸ਼ੇਕ ਸੰਵੇਦਨਸ਼ੀਲਤਾ',
+    countdownNotice: 'ਗਲਤੀ ਨਾਲ ਚਾਲੂ ਹੋਣ ਤੇ 5 ਸਕਿੰਟਾਂ ਵਿੱਚ ਰੱਦ ਕਰੋ',
   },
 };
 

@@ -11,8 +11,10 @@ import { VoiceEmergencyModal } from './components/VoiceEmergencyModal';
 import { DocumentLockerModal } from './components/DocumentLockerModal';
 import { PrivacySettingsModal } from './components/PrivacySettingsModal';
 import { EarthquakeModal } from './components/EarthquakeModal';
+import { ShakeSosModal } from './components/ShakeSosModal';
 import { SupportedLang, TRANSLATIONS } from './data/translations';
-import { Phone, AlertTriangle, Siren, Sparkles, BookOpen, ShieldCheck, Mic, Lock, Shield, Activity } from 'lucide-react';
+import { ShakeDetector, getShakeSettings } from './utils/shakeDetector';
+import { Phone, AlertTriangle, Siren, Sparkles, BookOpen, ShieldCheck, Mic, Lock, Shield, Activity, Smartphone } from 'lucide-react';
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState<SupportedLang>('en');
@@ -24,6 +26,8 @@ export default function App() {
   const [isLockerOpen, setIsLockerOpen] = useState<boolean>(false);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState<boolean>(false);
   const [isEarthquakeOpen, setIsEarthquakeOpen] = useState<boolean>(false);
+  const [isShakeSosOpen, setIsShakeSosOpen] = useState<boolean>(false);
+  const [isShakeTriggeredDirectly, setIsShakeTriggeredDirectly] = useState<boolean>(false);
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [trackSessionId, setTrackSessionId] = useState<string | null>(null);
   const [trackData, setTrackData] = useState<any | null>(null);
@@ -68,6 +72,41 @@ export default function App() {
       document.documentElement.classList.add('dark');
     }
   }, []);
+
+  // Global Shake-to-Emergency SOS Listener
+  useEffect(() => {
+    let shakeSettings = getShakeSettings();
+    const detector = new ShakeDetector(shakeSettings);
+
+    if (shakeSettings.enabled && !isShakeSosOpen) {
+      detector.start(() => {
+        // Physical shake detected! Trigger 5-second countdown immediately
+        setIsShakeTriggeredDirectly(true);
+        setIsShakeSosOpen(true);
+      });
+    }
+
+    const handleSettingsChanged = (e: any) => {
+      const newSettings = e.detail || getShakeSettings();
+      shakeSettings = newSettings;
+      detector.updateSettings(newSettings);
+      if (!newSettings.enabled || isShakeSosOpen) {
+        detector.stop();
+      } else {
+        detector.start(() => {
+          setIsShakeTriggeredDirectly(true);
+          setIsShakeSosOpen(true);
+        });
+      }
+    };
+
+    window.addEventListener('emergency-shake-settings-changed', handleSettingsChanged);
+
+    return () => {
+      detector.stop();
+      window.removeEventListener('emergency-shake-settings-changed', handleSettingsChanged);
+    };
+  }, [isShakeSosOpen]);
 
   const handleToggleDarkMode = () => {
     setDarkMode((prev) => {
@@ -138,6 +177,10 @@ export default function App() {
         onOpenLocker={() => setIsLockerOpen(true)}
         onOpenPrivacy={() => setIsPrivacyOpen(true)}
         onOpenEarthquake={() => setIsEarthquakeOpen(true)}
+        onOpenShakeSos={() => {
+          setIsShakeTriggeredDirectly(false);
+          setIsShakeSosOpen(true);
+        }}
         activeSection={activeSection}
         onNavigate={handleNavigate}
         darkMode={darkMode}
@@ -152,6 +195,10 @@ export default function App() {
           onOpenSos={() => setIsSosOpen(true)}
           onOpenSiren={() => setIsSirenOpen(true)}
           onOpenEarthquake={() => setIsEarthquakeOpen(true)}
+          onOpenShakeSos={() => {
+            setIsShakeTriggeredDirectly(false);
+            setIsShakeSosOpen(true);
+          }}
         />
 
         {/* Offline First-Aid Clinical Guide & Metronome */}
@@ -279,6 +326,19 @@ export default function App() {
           <span>SOS GPS</span>
         </button>
 
+        {/* Shake SOS */}
+        <button
+          onClick={() => {
+            setIsShakeTriggeredDirectly(false);
+            setIsShakeSosOpen(true);
+          }}
+          className="p-2.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-bold rounded-xl min-w-[44px] min-h-[44px] flex items-center justify-center border border-rose-200 dark:border-rose-900/60"
+          aria-label="Shake-to-Emergency SOS"
+          title="Shake SOS"
+        >
+          <Smartphone className="w-4 h-4" />
+        </button>
+
         {/* Earthquake Safety */}
         <button
           onClick={() => setIsEarthquakeOpen(true)}
@@ -326,6 +386,15 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      <ShakeSosModal
+        isOpen={isShakeSosOpen}
+        onClose={() => {
+          setIsShakeSosOpen(false);
+          setIsShakeTriggeredDirectly(false);
+        }}
+        currentLang={currentLang}
+        initialCountdownActive={isShakeTriggeredDirectly}
+      />
       <SosBeaconModal
         isOpen={isSosOpen}
         onClose={() => setIsSosOpen(false)}

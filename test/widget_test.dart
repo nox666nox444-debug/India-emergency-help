@@ -48,6 +48,10 @@ void main() {
     // Test Fire keywords
     expect(homeState.analyseEmergency('heavy smoke and fire'), contains('fire emergency'));
     expect(homeState.analyseEmergency('आग लग गई है'), contains('fire emergency'));
+
+    // Test Earthquake keywords
+    expect(homeState.analyseEmergency('earthquake shaking'), contains('earthquake emergency'));
+    expect(homeState.analyseEmergency('भूकंप आया है'), contains('earthquake emergency'));
   });
 
   testWidgets('Earthquake Emergency Screen and Checklist test', (WidgetTester tester) async {

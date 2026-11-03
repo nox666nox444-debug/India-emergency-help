@@ -3,6 +3,241 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      /**
+       * Robust Vite Development WebSocket & HMR Resilience Layer
+       * - Eliminates 'WebSocket closed without opened' errors in proxied development environments
+       * - Implements exponential backoff reconnects with health-check probing
+       * - Handles signal interruptions, sleep/wake, tab visibility, and network restoration
+       */
+      (function() {
+        if (typeof window === 'undefined' || !window.WebSocket) return;
+
+        var NativeWebSocket = window.WebSocket;
+        var isPageUnloading = false;
+
+        window.addEventListener('beforeunload', function() {
+          isPageUnloading = true;
+        });
+
+        function RobustDevWebSocket(url, protocols) {
+          var isDevHmr = false;
+          try {
+            var urlStr = String(url);
+            isDevHmr = urlStr.includes('vite') ||
+                       urlStr.includes(':3000') ||
+                       (protocols && String(protocols).includes('vite-hmr'));
+          } catch (e) {
+            isDevHmr = false;
+          }
+
+          if (!isDevHmr) {
+            return protocols !== undefined
+              ? new NativeWebSocket(url, protocols)
+              : new NativeWebSocket(url);
+          }
+
+          var targetUrl = url;
+          var targetProtocols = protocols;
+          var currentWs = null;
+          var listeners = { open: [], message: [], error: [], close: [] };
+          var onOpenHandler = null;
+          var onMessageHandler = null;
+          var onErrorHandler = null;
+          var onCloseHandler = null;
+          var binaryTypeValue = 'blob';
+          var retryCount = 0;
+          var baseDelay = 1000;
+          var maxRetryDelay = 12000;
+          var retryTimer = null;
+          var hasOpened = false;
+          var isClosedManually = false;
+
+          var proxy = {
+            CONNECTING: 0,
+            OPEN: 1,
+            CLOSING: 2,
+            CLOSED: 3,
+            get readyState() {
+              return currentWs ? currentWs.readyState : (isClosedManually ? 3 : 0);
+            },
+            get bufferedAmount() {
+              return currentWs ? currentWs.bufferedAmount : 0;
+            },
+            get extensions() {
+              return currentWs ? currentWs.extensions : '';
+            },
+            get protocol() {
+              return currentWs ? currentWs.protocol : '';
+            },
+            get url() {
+              return targetUrl;
+            },
+            get binaryType() {
+              return currentWs ? currentWs.binaryType : binaryTypeValue;
+            },
+            set binaryType(val) {
+              binaryTypeValue = val;
+              if (currentWs) currentWs.binaryType = val;
+            },
+            get onopen() { return onOpenHandler; },
+            set onopen(fn) { onOpenHandler = fn; },
+            get onmessage() { return onMessageHandler; },
+            set onmessage(fn) { onMessageHandler = fn; },
+            get onerror() { return onErrorHandler; },
+            set onerror(fn) { onErrorHandler = fn; },
+            get onclose() { return onCloseHandler; },
+            set onclose(fn) { onCloseHandler = fn; },
+            send: function(data) {
+              if (currentWs && currentWs.readyState === 1) {
+                currentWs.send(data);
+              }
+            },
+            close: function(code, reason) {
+              isClosedManually = true;
+              if (retryTimer) clearTimeout(retryTimer);
+              if (currentWs) {
+                try { currentWs.close(code, reason); } catch (e) {}
+              }
+            },
+            addEventListener: function(type, listener) {
+              if (listeners[type]) {
+                listeners[type].push(listener);
+              } else if (currentWs) {
+                currentWs.addEventListener(type, listener);
+              }
+            },
+            removeEventListener: function(type, listener) {
+              if (listeners[type]) {
+                listeners[type] = listeners[type].filter(function(l) { return l !== listener; });
+              } else if (currentWs) {
+                currentWs.removeEventListener(type, listener);
+              }
+            },
+            dispatchEvent: function(event) {
+              if (currentWs) return currentWs.dispatchEvent(event);
+              return true;
+            }
+          };
+
+          function emit(type, event) {
+            var handler = type === 'open' ? onOpenHandler :
+                          type === 'message' ? onMessageHandler :
+                          type === 'error' ? onErrorHandler :
+                          type === 'close' ? onCloseHandler : null;
+            if (typeof handler === 'function') {
+              try { handler.call(proxy, event); } catch (err) {}
+            }
+            if (listeners[type]) {
+              listeners[type].forEach(function(fn) {
+                try { fn.call(proxy, event); } catch (err) {}
+              });
+            }
+          }
+
+          function connect() {
+            if (isClosedManually || isPageUnloading) return;
+
+            try {
+              currentWs = targetProtocols !== undefined
+                ? new NativeWebSocket(targetUrl, targetProtocols)
+                : new NativeWebSocket(targetUrl);
+              currentWs.binaryType = binaryTypeValue;
+            } catch (err) {
+              scheduleRetry();
+              return;
+            }
+
+            currentWs.onopen = function(event) {
+              hasOpened = true;
+              retryCount = 0;
+              emit('open', event);
+            };
+
+            currentWs.onmessage = function(event) {
+              emit('message', event);
+            };
+
+            currentWs.onerror = function(event) {
+              // Suppress unhandled console noise if connection closed before opening
+              if (!hasOpened) {
+                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+              } else {
+                emit('error', event);
+              }
+            };
+
+            currentWs.onclose = function(event) {
+              if (isClosedManually || isPageUnloading) {
+                emit('close', event);
+                return;
+              }
+
+              // Handle premature close without open: schedule retry without crashing
+              if (!hasOpened) {
+                scheduleRetry();
+              } else {
+                hasOpened = false;
+                emit('close', event);
+                scheduleRetry();
+              }
+            };
+          }
+
+          function scheduleRetry() {
+            if (isClosedManually || isPageUnloading) return;
+            if (retryTimer) clearTimeout(retryTimer);
+
+            retryCount++;
+            var delay = Math.min(
+              maxRetryDelay,
+              Math.round(baseDelay * Math.pow(1.5, retryCount - 1) + Math.random() * 400)
+            );
+
+            retryTimer = setTimeout(function() {
+              // Probe dev server HTTP endpoint before initiating WebSocket handshake
+              fetch('/api/health')
+                .then(function(res) {
+                  if (res.ok) {
+                    connect();
+                  } else {
+                    scheduleRetry();
+                  }
+                })
+                .catch(function() {
+                  scheduleRetry();
+                });
+            }, delay);
+          }
+
+          // Recover immediately upon network reconnection or tab foregrounding
+          window.addEventListener('online', function() {
+            if (!hasOpened && !isClosedManually) {
+              if (retryTimer) clearTimeout(retryTimer);
+              connect();
+            }
+          });
+
+          document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible' && !hasOpened && !isClosedManually) {
+              if (retryTimer) clearTimeout(retryTimer);
+              connect();
+            }
+          });
+
+          connect();
+          return proxy;
+        }
+
+        RobustDevWebSocket.CONNECTING = 0;
+        RobustDevWebSocket.OPEN = 1;
+        RobustDevWebSocket.CLOSING = 2;
+        RobustDevWebSocket.CLOSED = 3;
+        RobustDevWebSocket.prototype = NativeWebSocket.prototype;
+
+        window.WebSocket = RobustDevWebSocket;
+      })();
+    </script>
     <title>India Emergency Help - 112 & Disaster Response</title>
     <meta name="description" content="Comprehensive emergency assistance platform for India featuring 112, Police, Ambulance, Fire, Women & Child Safety helplines, instant SOS location beacon, siren alarm, and offline first-aid triage." />
     <meta property="og:title" content="India Emergency Help - 112 & Disaster Response" />

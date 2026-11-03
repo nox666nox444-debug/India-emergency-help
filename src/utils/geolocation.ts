@@ -13,19 +13,44 @@ export interface EmergencyContactPerson {
   name: string;
   phone: string;
   relation: string;
+  countryCode?: string; // e.g. '+91'
+  priority?: number;
+  enabledForSos?: boolean;
 }
 
 const CONTACTS_STORAGE_KEY = 'india_emergency_personal_contacts_v1';
+
+export function formatFullPhoneNumber(countryCode?: string, phone?: string): string {
+  if (!phone) return '';
+  const clean = phone.trim();
+  if (clean.startsWith('+')) return clean;
+  const cc = countryCode && countryCode.trim() ? countryCode.trim() : '+91';
+  return `${cc}${clean.replace(/^0+/, '')}`;
+}
 
 export function getSavedContacts(): EmergencyContactPerson[] {
   try {
     const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
     if (!raw) {
       return [
-        { id: '1', name: 'Primary Family Contact', phone: '', relation: 'Family' },
+        {
+          id: '1',
+          name: 'Primary Family Contact',
+          phone: '',
+          relation: 'Family',
+          countryCode: '+91',
+          priority: 1,
+          enabledForSos: true,
+        },
       ];
     }
-    return JSON.parse(raw);
+    const list: EmergencyContactPerson[] = JSON.parse(raw);
+    return list.map((c, i) => ({
+      countryCode: c.countryCode || '+91',
+      priority: c.priority ?? i + 1,
+      enabledForSos: c.enabledForSos ?? true,
+      ...c,
+    }));
   } catch {
     return [];
   }
@@ -39,9 +64,22 @@ export function saveContacts(contacts: EmergencyContactPerson[]) {
   }
 }
 
+export function reorderContacts(
+  contacts: EmergencyContactPerson[],
+  index: number,
+  direction: 'up' | 'down'
+): EmergencyContactPerson[] {
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= contacts.length) return contacts;
+  const copy = [...contacts];
+  const [removed] = copy.splice(index, 1);
+  copy.splice(targetIndex, 0, removed);
+  return copy.map((c, i) => ({ ...c, priority: i + 1 }));
+}
+
 export function getCurrentLocation(): Promise<UserLocation> {
   return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator)) {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
       return reject(new Error('Geolocation is not supported by your browser or device.'));
     }
 
@@ -57,19 +95,46 @@ export function getCurrentLocation(): Promise<UserLocation> {
         });
       },
       (err) => {
+        // If high-accuracy GPS satellite lock times out (common indoors), attempt fallback with network/Wi-Fi positioning
+        if (err.code === err.TIMEOUT) {
+          navigator.geolocation.getCurrentPosition(
+            (fallbackPos) => {
+              resolve({
+                latitude: fallbackPos.coords.latitude,
+                longitude: fallbackPos.coords.longitude,
+                accuracy: Math.round(fallbackPos.coords.accuracy),
+                timestamp: fallbackPos.timestamp,
+                altitude: fallbackPos.coords.altitude,
+                speed: fallbackPos.coords.speed,
+              });
+            },
+            () => {
+              reject(
+                new Error(
+                  'Location request timed out. Please check that GPS / Location Services are turned on in your device settings.'
+                )
+              );
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 6000,
+              maximumAge: 60000,
+            }
+          );
+          return;
+        }
+
         let msg = 'Failed to retrieve location.';
         if (err.code === err.PERMISSION_DENIED) {
-          msg = 'Location permission was denied. Please allow location access to dispatch your SOS coordinates.';
+          msg = 'Location permission was denied. Please allow location access in your browser or app settings to dispatch your SOS coordinates.';
         } else if (err.code === err.POSITION_UNAVAILABLE) {
-          msg = 'Location information is unavailable on your device.';
-        } else if (err.code === err.TIMEOUT) {
-          msg = 'Location request timed out. Please try again.';
+          msg = 'Location information is currently unavailable on your device.';
         }
         reject(new Error(msg));
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 9000,
         maximumAge: 0,
       }
     );
@@ -106,13 +171,20 @@ export function openWhatsAppSos(message: string, phoneNumber?: string) {
   const cleanPhone = (phoneNumber || '').replace(/[^0-9]/g, '');
   const target = cleanPhone ? `phone=${cleanPhone}&` : '';
   const url = `https://api.whatsapp.com/send?${target}text=${encodeURIComponent(message)}`;
-  window.open(url, '_blank', 'noopener,noreferrer');
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!win) {
+    window.location.href = url;
+  }
 }
 
 export function openSmsSos(message: string, phoneNumber?: string) {
-  const cleanPhone = (phoneNumber || '').replace(/[^0-9]/g, '');
-  // iOS and Android sms link compatibility
-  const separator = navigator.userAgent.match(/iPhone|iPad|iPod/i) ? '&' : '?';
+  const cleanPhone = (phoneNumber || '').replace(/[^0-9+]/g, '');
+  // iOS Safari (including iPadOS requesting desktop site) requires '&body='
+  const isIos =
+    typeof navigator !== 'undefined' &&
+    (/iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const separator = isIos ? '&' : '?';
   const url = `sms:${cleanPhone}${separator}body=${encodeURIComponent(message)}`;
   window.location.href = url;
 }
